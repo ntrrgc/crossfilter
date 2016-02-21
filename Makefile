@@ -3,6 +3,7 @@
 all: crossfilter.min.js
 
 crossfilter.js: \
+	src/nativecomparison.js \
 	src/identity.js \
 	src/permute.js \
 	src/bisect.js \

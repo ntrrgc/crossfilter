@@ -63,7 +63,7 @@ function crossfilter() {
   }
 
   // Adds a new dimension with the specified value accessor function.
-  function dimension(value) {
+  function dimension(value, comparisonOperators) {
     var dimension = {
       filter: filter,
       filterExact: filterExact,
@@ -78,13 +78,20 @@ function crossfilter() {
       remove: dispose // for backwards-compatibility
     };
 
+    if (!comparisonOperators) {
+      comparisonOperators = nativeComparisonOperators;
+    }
+
+    var gt = comparisonOperators.gt,
+        gte = comparisonOperators.gte;
+
     var one = ~m & -~m, // lowest unset bit as mask, e.g., 00001000
         zero = ~one, // inverted one, e.g., 11110111
         values, // sorted, cached array
         index, // value rank ↦ object id
         newValues, // temporary array storing newly-added values
         newIndex, // temporary array storing newly-added index
-        sort = quicksort_by(function(i) { return newValues[i]; }),
+        sort = quicksort_by(function(i) { return newValues[i]; }, comparisonOperators),
         refilter = crossfilter_filterAll, // for recomputing filter
         refilterFunction, // the custom filter function in use
         indexListeners = [], // when data is added
@@ -414,7 +421,7 @@ function crossfilter() {
         if (k0) x0 = (g0 = oldGroups[0]).key;
 
         // Find the first new key (x1), skipping NaN keys.
-        while (i1 < n1 && !((x1 = key(newValues[i1])) >= x1)) ++i1;
+        while (i1 < n1 && !(gte(x1 = key(newValues[i1]), x1))) ++i1;
 
         // While new keys remain…
         while (i1 < n1) {
@@ -438,7 +445,7 @@ function crossfilter() {
 
           // Add any selected records belonging to the added group, while
           // advancing the new key and populating the associated group index.
-          while (!(x1 > x)) {
+          while (!(gt(x1, x))) {
             groupIndex[j = newIndex[i1] + n0] = k;
             if (!(filters[j] & zero)) g.value = add(g.value, data[j]);
             if (++i1 >= n1) break;

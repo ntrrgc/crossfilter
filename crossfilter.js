@@ -1,5 +1,20 @@
 (function(exports){
 crossfilter.version = "1.3.12";
+function checkArrayWarning(a, b) {
+    if (Array.isArray(a) || Array.isArray(b)) {
+        console.warn('Native comparison of arrays in JavaScript is very slow. Provide ' +
+            'a custom comparison interface in your dimension() call to improve the ' +
+            'performance of crossfilter.');
+    }
+}
+
+var nativeComparisonOperators = {
+    name: 'native',
+    lt: function _lt(a,b)   {return a < b},
+    lte: function _lte(a,b) {return a <= b},
+    gt: function _gt(a,b)   {return a > b},
+    gte: function _gte(a,b) {return a >= b}
+};
 function crossfilter_identity(d) {
   return d;
 }
@@ -139,11 +154,15 @@ var insertionsort = crossfilter.insertionsort = insertionsort_by(crossfilter_ide
 
 insertionsort.by = insertionsort_by;
 
-function insertionsort_by(f) {
+function insertionsort_by(f, comparisonOperators) {
+  if (!comparisonOperators) {
+    comparisonOperators = nativeComparisonOperators;
+  }
+  var gt = comparisonOperators.gt;
 
   function insertionsort(a, lo, hi) {
     for (var i = lo + 1; i < hi; ++i) {
-      for (var j = i, t = a[i], x = f(t); j > lo && f(a[j - 1]) > x; --j) {
+      for (var j = i, t = a[i], x = f(t); j > lo && gt(f(a[j - 1]), x); --j) {
         a[j] = a[j - 1];
       }
       a[j] = t;
@@ -156,12 +175,65 @@ function insertionsort_by(f) {
 // Algorithm designed by Vladimir Yaroslavskiy.
 // Implementation based on the Dart project; see lib/dart/LICENSE for details.
 
-var quicksort = crossfilter.quicksort = quicksort_by(crossfilter_identity);
+var quicksort_by_implementations = {};
+
+var quicksort = crossfilter.quicksort = quicksort_by(crossfilter_identity,
+    nativeComparisonOperators);
 
 quicksort.by = quicksort_by;
 
-function quicksort_by(f) {
-  var insertionsort = insertionsort_by(f);
+function quicksort_by(f, comparisonOperators) {
+  if (!comparisonOperators) {
+    comparisonOperators = nativeComparisonOperators;
+  }
+  var implName = comparisonOperators.name;
+  if (!(implName in quicksort_by_implementations)) {
+    quicksort_by_implementations[implName] = compile_quicksort_by(comparisonOperators);
+  }
+  return quicksort_by_implementations[implName](f, comparisonOperators);
+}
+
+function dumpObject(obj) {
+  if (typeof obj == "object") {
+    var values = [];
+    for (var key in obj) {
+      values.push(JSON.stringify(key) + ': ' + dumpObject(obj[key]))
+    }
+
+    return '{\n' + values.join(',\n') + '\n}';
+  } else if (typeof obj == "string") {
+    return JSON.stringify(obj);
+  } else {
+    return obj.toString();
+  }
+}
+
+function compile_quicksort_by(comparisonOperators) {
+  var code = '';
+
+  // Inline comparisonOperators
+  code += 'var comparisonOperators = ' + dumpObject(comparisonOperators) + ';\n';
+
+  // Import insertionsort_by
+  code += insertionsort_by.toString() + '\n';
+
+  // Strip function name, arguments, opening and closing braces
+  var quicksort_impl = quicksort_by_impl.toString();
+  var openBrace = quicksort_impl.indexOf('{');
+  var closeBrace = quicksort_impl.lastIndexOf('}');
+  code += quicksort_impl.substr(openBrace + 1, closeBrace - openBrace - 1);
+
+  return new Function('f', code);
+}
+
+function quicksort_by_impl(f, comparisonOperators) {
+  var insertionsort = insertionsort_by(f, comparisonOperators);
+  var lt = comparisonOperators.lt,
+      gt = comparisonOperators.gt,
+      lte = comparisonOperators.lte,
+      gte = comparisonOperators.gte;
+
+  var quicksort_sizeThreshold = 32;
 
   function sort(a, lo, hi) {
     return (hi - lo < quicksort_sizeThreshold
@@ -187,15 +259,15 @@ function quicksort_by(f) {
     var t;
 
     // Sort the selected 5 elements using a sorting network.
-    if (x1 > x2) t = e1, e1 = e2, e2 = t, t = x1, x1 = x2, x2 = t;
-    if (x4 > x5) t = e4, e4 = e5, e5 = t, t = x4, x4 = x5, x5 = t;
-    if (x1 > x3) t = e1, e1 = e3, e3 = t, t = x1, x1 = x3, x3 = t;
-    if (x2 > x3) t = e2, e2 = e3, e3 = t, t = x2, x2 = x3, x3 = t;
-    if (x1 > x4) t = e1, e1 = e4, e4 = t, t = x1, x1 = x4, x4 = t;
-    if (x3 > x4) t = e3, e3 = e4, e4 = t, t = x3, x3 = x4, x4 = t;
-    if (x2 > x5) t = e2, e2 = e5, e5 = t, t = x2, x2 = x5, x5 = t;
-    if (x2 > x3) t = e2, e2 = e3, e3 = t, t = x2, x2 = x3, x3 = t;
-    if (x4 > x5) t = e4, e4 = e5, e5 = t, t = x4, x4 = x5, x5 = t;
+    if (gt(x1, x2)) t = e1, e1 = e2, e2 = t, t = x1, x1 = x2, x2 = t;
+    if (gt(x4, x5)) t = e4, e4 = e5, e5 = t, t = x4, x4 = x5, x5 = t;
+    if (gt(x1, x3)) t = e1, e1 = e3, e3 = t, t = x1, x1 = x3, x3 = t;
+    if (gt(x2, x3)) t = e2, e2 = e3, e3 = t, t = x2, x2 = x3, x3 = t;
+    if (gt(x1, x4)) t = e1, e1 = e4, e4 = t, t = x1, x1 = x4, x4 = t;
+    if (gt(x3, x4)) t = e3, e3 = e4, e4 = t, t = x3, x3 = x4, x4 = t;
+    if (gt(x2, x5)) t = e2, e2 = e5, e5 = t, t = x2, x2 = x5, x5 = t;
+    if (gt(x2, x3)) t = e2, e2 = e3, e3 = t, t = x2, x2 = x3, x3 = t;
+    if (gt(x4, x5)) t = e4, e4 = e5, e5 = t, t = x4, x4 = x5, x5 = t;
 
     var pivot1 = e2, pivotValue1 = x2,
         pivot2 = e4, pivotValue2 = x4;
@@ -214,7 +286,7 @@ function quicksort_by(f) {
     // Note that for value comparison, <, <=, >= and > coerce to a primitive via
     // Object.prototype.valueOf; == and === do not, so in order to be consistent
     // with natural order (such as for Date objects), we must do two compares.
-    var pivotsEqual = pivotValue1 <= pivotValue2 && pivotValue1 >= pivotValue2;
+    var pivotsEqual = lte(pivotValue1, pivotValue2) && gte(pivotValue1, pivotValue2);
     if (pivotsEqual) {
 
       // Degenerated case where the partitioning becomes a dutch national flag
@@ -292,17 +364,17 @@ function quicksort_by(f) {
       //   3. for x in ]great, right[ : x > pivot2
       for (var k = less; k <= great; k++) {
         var ek = a[k], xk = f(ek);
-        if (xk < pivotValue1) {
+        if (lt(xk, pivotValue1)) {
           if (k !== less) {
             a[k] = a[less];
             a[less] = ek;
           }
           ++less;
         } else {
-          if (xk > pivotValue2) {
+          if (gt(xk, pivotValue2)) {
             while (true) {
               var greatValue = f(a[great]);
-              if (greatValue > pivotValue2) {
+              if (gt(greatValue, pivotValue2)) {
                 great--;
                 if (great < k) break;
                 // This is the only location inside the loop where a new
@@ -310,7 +382,7 @@ function quicksort_by(f) {
                 continue;
               } else {
                 // a[great] <= pivot2.
-                if (greatValue < pivotValue1) {
+                if (lt(greatValue, pivotValue1)) {
                   // Triple exchange.
                   a[k] = a[less];
                   a[less++] = a[great];
@@ -432,10 +504,24 @@ function quicksort_by(f) {
     return sort(a, less, great + 1);
   }
 
-  return sort;
+  return function(a, lo, hi) {
+    if (comparisonOperators.name == 'native') {
+      var val = f(a[0]);
+      if (val && typeof val.valueOf() == 'object') {
+        console.warn("Using non primitive data in dimensions with native comparison " +
+            "operators is slow. Consider providing custom comparison functions in " +
+            ".dimenension() call.");
+        console.warn("The non primitive value was: %s", JSON.stringify(f(a[0]).valueOf()))
+      } else if (val === undefined) {
+        console.warn("Sorting key function returned undefined for the data element %s.",
+            a[0])
+      }
+    }
+    return sort(a, lo, hi)
+  }
 }
 
-var quicksort_sizeThreshold = 32;
+
 var crossfilter_array8 = crossfilter_arrayUntyped,
     crossfilter_array16 = crossfilter_arrayUntyped,
     crossfilter_array32 = crossfilter_arrayUntyped,
@@ -591,7 +677,7 @@ function crossfilter() {
   }
 
   // Adds a new dimension with the specified value accessor function.
-  function dimension(value) {
+  function dimension(value, comparisonOperators) {
     var dimension = {
       filter: filter,
       filterExact: filterExact,
@@ -606,13 +692,20 @@ function crossfilter() {
       remove: dispose // for backwards-compatibility
     };
 
+    if (!comparisonOperators) {
+      comparisonOperators = nativeComparisonOperators;
+    }
+
+    var gt = comparisonOperators.gt,
+        gte = comparisonOperators.gte;
+
     var one = ~m & -~m, // lowest unset bit as mask, e.g., 00001000
         zero = ~one, // inverted one, e.g., 11110111
         values, // sorted, cached array
         index, // value rank ↦ object id
         newValues, // temporary array storing newly-added values
         newIndex, // temporary array storing newly-added index
-        sort = quicksort_by(function(i) { return newValues[i]; }),
+        sort = quicksort_by(function(i) { return newValues[i]; }, comparisonOperators),
         refilter = crossfilter_filterAll, // for recomputing filter
         refilterFunction, // the custom filter function in use
         indexListeners = [], // when data is added
@@ -942,7 +1035,7 @@ function crossfilter() {
         if (k0) x0 = (g0 = oldGroups[0]).key;
 
         // Find the first new key (x1), skipping NaN keys.
-        while (i1 < n1 && !((x1 = key(newValues[i1])) >= x1)) ++i1;
+        while (i1 < n1 && !(gte(x1 = key(newValues[i1]), x1))) ++i1;
 
         // While new keys remain…
         while (i1 < n1) {
@@ -966,7 +1059,7 @@ function crossfilter() {
 
           // Add any selected records belonging to the added group, while
           // advancing the new key and populating the associated group index.
-          while (!(x1 > x)) {
+          while (!(gt(x1, x))) {
             groupIndex[j = newIndex[i1] + n0] = k;
             if (!(filters[j] & zero)) g.value = add(g.value, data[j]);
             if (++i1 >= n1) break;
