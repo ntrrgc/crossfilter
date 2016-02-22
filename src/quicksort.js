@@ -331,7 +331,7 @@ function quicksort_by_impl(f, comparisonOperators) {
   }
 
   return function(a, lo, hi) {
-    if (comparisonOperators.name == 'native') {
+    if (a.length > 0 && comparisonOperators.name == 'native') {
       var val = f(a[0]);
       if (val && typeof val.valueOf() == 'object') {
         console.warn("Using non primitive data in dimensions with native comparison " +
